@@ -2,6 +2,10 @@
 `python-bithumb`는 Bithumb의 Public/Private API를 Python에서 간편하게 사용할 수 있는 래퍼 라이브러리입니다.  
 Bithumb의 시세 조회, 캔들(OHLCV) 조회, 주문(지정가/시장가), 잔고 조회, 주문 취소, 개별 주문 조회, 주문 가능 정보 등을 다룰 수 있습니다.
 
+## python-bithumb 가이드
+`python-bithumb`의 소스 코드 기반의 지식(Knowledge)을 가진 GPTs에게 질문하시면 더 자세한 가이드를 얻으실 수 있습니다.
+python-bithumb GPTs 링크: [https://chatgpt.com/g/g-6764a2fc67988191a4382c8511d509d0-python-bithumb-gaideu](https://chatgpt.com/g/g-6764a2fc67988191a4382c8511d509d0-python-bithumb-gaideu)
+
 ## 주요 특징
 - **Public API**:  
   - OHLCV(일봉, 분봉, 주봉, 월봉) 조회
@@ -32,8 +36,12 @@ python setup.py install
 import python_bithumb
 
 # 특정 마켓의 일봉 데이터 조회 (최근 5일)
-df = python_bithumb.get_ohlcv("KRW-BTC", count=5)
+df = python_bithumb.get_ohlcv("KRW-BTC", interval="day", count=5)
 print(df)
+
+# 특정 마켓의 1분봉 데이터 조회 (최근 10개)
+df_min = python_bithumb.get_ohlcv("KRW-BTC", interval="minute1", count=10)
+print(df_min)
 
 # 현재가 조회 (단일 티커)
 price = python_bithumb.get_current_price("KRW-BTC")
@@ -62,6 +70,10 @@ bithumb = python_bithumb.Bithumb(access_key, secret_key)
 # 전체 계좌 조회
 balances = bithumb.get_balances()
 print(balances)
+
+# 특정 화폐의 잔고 조회
+krw_balance = bithumb.get_balance("KRW")
+print(krw_balance)
 
 # 지정가 매수 주문 (예: KRW-BTC를 139,000,000원에 0.0001 BTC 매수)
 order_info = bithumb.buy_limit_order("KRW-BTC", 139000000, 0.0001)
@@ -99,14 +111,15 @@ print(cancel_result)
 ## 함수 정리
 ### Public API 함수
 - get_ohlcv(ticker, interval="day", count=200, period=0.1, to=None)
-특정 마켓의 캔들 데이터를 Pandas DataFrame으로 반환.
-
+ - 특정 마켓의 캔들 데이터를 Pandas DataFrame으로 반환.
+ - interval: 조회 간격. "day" (일봉, 기본값), "week" (주봉), "month" (월봉), "minute1", "minute3", "minute5", "minute10", "minute15", "minute30", "minute60", "minute240".
+ - count: 조회할 캔들 개수 (최대 200개).
+ - to: 마지막 캔들의 기준 시간 (ISO 8601 형식).
+ - period: API 호출 간 간격 (초 단위).
 - get_current_price(markets)
-현재가 조회 (단일/복수 종목 가능).
-
+ - 현재가 조회 (단일/복수 종목 가능).
 - get_orderbook(markets)
-호가 정보 조회.
-
+ - 호가 정보 조회.
 그 외 get_market_all, get_trades_ticks, get_virtual_asset_warning 등을 통해 마켓 코드, 최근 체결, 경보 종목 정보도 조회 가능.
 
 ### Private API 함수 (Bithumb 클래스)
