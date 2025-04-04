@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="python-bithumb",  # PyPI에 배포할 패키지 이름
-    version="0.1.1",        # 패키지 버전
+    version="0.1.2",        # 패키지 버전
     author="youtube-jocoding",
     author_email="business@jocoding.net",
     description="A Python wrapper for Bithumb API",
