@@ -6,6 +6,7 @@ import time
 import hashlib
 from urllib.parse import urlencode
 import json
+from .public_api import BithumbAPIException
 
 class Bithumb:
     BASE_URL = "https://api.bithumb.com"
@@ -55,6 +56,38 @@ class Bithumb:
             token = token.decode('utf-8')
         return 'Bearer ' + token
 
+    def _handle_response(self, response):
+        """
+        API 응답을 처리하고 오류를 적절히 처리합니다.
+        
+        Args:
+            response: requests Response 객체
+            
+        Returns:
+            파싱된 JSON 응답 데이터
+            
+        Raises:
+            BithumbAPIException: API가 오류를 반환하는 경우
+        """
+        if response.status_code != 200:
+            error_msg = "Unknown error"
+            try:
+                error_data = response.json()
+                if isinstance(error_data, dict) and 'error' in error_data:
+                    error_info = error_data['error']
+                    if isinstance(error_info, dict):
+                        error_name = error_info.get('name', 'Unknown error code')
+                        error_message = error_info.get('message', 'No error message provided')
+                        error_msg = f"Error {error_name}: {error_message}"
+                    else:
+                        error_msg = str(error_info)
+            except:
+                error_msg = response.text or "Could not parse error response"
+            
+            raise BithumbAPIException(response.status_code, error_msg, response)
+        
+        return response.json()
+
     def _request(self, method: str, endpoint: str, params=None, data=None):
         """
         Private API 요청을 처리하는 헬퍼 메소드.
@@ -77,8 +110,8 @@ class Bithumb:
         
         Raises
         ------
-        requests.exceptions.RequestException
-            HTTP 요청 실패 시 예외 발생
+        BithumbAPIException
+            API 요청 실패 시 상세 에러 정보와 함께 예외 발생
         """
         url = f"{self.BASE_URL}{endpoint}"
 
@@ -93,6 +126,7 @@ class Bithumb:
             headers['Authorization'] = self._create_token(query_hash=query_hash, query_hash_alg='SHA512')
             headers['Content-Type'] = 'application/json'
             resp = requests.request(method, url, headers=headers, params=None, data=json.dumps(data))
+            return self._handle_response(resp)
         elif method.upper() == "GET":
             # GET 요청인 경우 params를 이용
             # query_hash 필요: Private API GET 요청 시에도 파라미터가 있으면 query_hash 필요
@@ -108,13 +142,12 @@ class Bithumb:
                 headers['Authorization'] = self._create_token()
 
             resp = requests.get(url, headers=headers, params=params)
+            return self._handle_response(resp)
         else:
             # data 없음 or 기타 method
             headers['Authorization'] = self._create_token()
             resp = requests.request(method, url, headers=headers, params=params, data=data)
-
-        resp.raise_for_status()
-        return resp.json()
+            return self._handle_response(resp)
 
     def get_balances(self):
         """
@@ -325,8 +358,7 @@ class Bithumb:
 
         url = f"{self.BASE_URL}/v1/orders?{final_query}"
         resp = requests.get(url, headers=headers)
-        resp.raise_for_status()
-        return resp.json()
+        return self._handle_response(resp)
 
     def cancel_order(self, order_uuid: str):
         """
@@ -367,5 +399,4 @@ class Bithumb:
 
         url = f"{self.BASE_URL}{endpoint}"
         resp = requests.delete(url, headers=headers, params=params)
-        resp.raise_for_status()
-        return resp.json()
+        return self._handle_response(resp)

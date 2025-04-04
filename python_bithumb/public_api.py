@@ -2,6 +2,52 @@ import requests
 import pandas as pd
 import time
 
+class BithumbAPIException(Exception):
+    """Exception raised for Bithumb API errors.
+    
+    Attributes:
+        status_code -- HTTP status code
+        error_msg -- error message from the API
+        response -- full response object
+    """
+    
+    def __init__(self, status_code, error_msg, response):
+        self.status_code = status_code
+        self.error_msg = error_msg
+        self.response = response
+        super().__init__(f"Bithumb API Error (HTTP {status_code}): {error_msg}")
+
+def _handle_response(response):
+    """Process API response and handle errors appropriately.
+    
+    Args:
+        response: requests Response object
+        
+    Returns:
+        Parsed JSON response data
+        
+    Raises:
+        BithumbAPIException: If API returns an error
+    """
+    if response.status_code != 200:
+        error_msg = "Unknown error"
+        try:
+            error_data = response.json()
+            if isinstance(error_data, dict) and 'error' in error_data:
+                error_info = error_data['error']
+                if isinstance(error_info, dict):
+                    error_name = error_info.get('name', 'Unknown error code')
+                    error_message = error_info.get('message', 'No error message provided')
+                    error_msg = f"Error {error_name}: {error_message}"
+                else:
+                    error_msg = str(error_info)
+        except:
+            error_msg = response.text or "Could not parse error response"
+        
+        raise BithumbAPIException(response.status_code, error_msg, response)
+    
+    return response.json()
+
 def get_ohlcv(ticker: str, interval: str = "day", count: int = 200, period: float = 0.1, to: str = None):
     base_url = "https://api.bithumb.com/v1"
 
@@ -36,8 +82,7 @@ def get_ohlcv(ticker: str, interval: str = "day", count: int = 200, period: floa
             params["to"] = current_to
 
         resp = requests.get(f"{base_url}/{endpoint}", params=params)
-        resp.raise_for_status()
-        data = resp.json()
+        data = _handle_response(resp)
 
         if not isinstance(data, list) or len(data) == 0:
             break
@@ -78,8 +123,7 @@ def get_current_price(markets):
 
     params = {"markets": market_str}
     resp = requests.get(f"{base_url}/ticker", params=params)
-    resp.raise_for_status()
-    data = resp.json()
+    data = _handle_response(resp)
 
     if isinstance(data, list):
         ticker_data = data
@@ -109,8 +153,7 @@ def get_orderbook(markets):
 
     params = {"markets": market_str}
     resp = requests.get(f"{base_url}/orderbook", params=params)
-    resp.raise_for_status()
-    data = resp.json()
+    data = _handle_response(resp)
 
     if isinstance(data, list):
         orderbook_data = data
@@ -156,13 +199,7 @@ def get_market_all():
     """
     base_url = "https://api.bithumb.com/v1"
     resp = requests.get(f"{base_url}/market/all")
-    resp.raise_for_status()
-    data = resp.json()
-
-    if isinstance(data, list):
-        return data
-    else:
-        return []
+    return _handle_response(resp)
 
 def get_trades_ticks(market: str, to: str = None, count: int = 1, cursor: str = None, daysAgo: int = None):
     """
@@ -193,13 +230,7 @@ def get_trades_ticks(market: str, to: str = None, count: int = 1, cursor: str = 
         params["daysAgo"] = daysAgo
 
     resp = requests.get(f"{base_url}/trades/ticks", params=params)
-    resp.raise_for_status()
-    data = resp.json()
-
-    if isinstance(data, list):
-        return data
-    else:
-        return []
+    return _handle_response(resp)
 
 def get_virtual_asset_warning():
     """
@@ -217,10 +248,4 @@ def get_virtual_asset_warning():
     """
     base_url = "https://api.bithumb.com/v1"
     resp = requests.get(f"{base_url}/market/virtual_asset_warning")
-    resp.raise_for_status()
-    data = resp.json()
-
-    if isinstance(data, list):
-        return data
-    else:
-        return []
+    return _handle_response(resp)
