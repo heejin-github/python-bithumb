@@ -69,7 +69,7 @@ class Bithumb:
         Raises:
             BithumbAPIException: API가 오류를 반환하는 경우
         """
-        if response.status_code != 200:
+        if response.status_code != 200 and response.status_code != 201:
             error_msg = "Unknown error"
             try:
                 error_data = response.json()
