@@ -46,20 +46,36 @@ def place_buy_order_and_wait(bithumb_api, ticker, price, volume):
         order = bithumb_api.get_order(order_uuid)
         # print(f"[{thread_name}] Initial order details:", order)
         state = order['state']
+
+        poll_count = 0
+        max_polls = 30
+
         while state != 'done':
+            if poll_count >= max_polls:
+                print(f"[{thread_name}] Buy order {order_uuid} for {ticker} did not complete within {max_polls} polls. Last known state: {state}. Details: {order}")
+                # Check if any part of the order was filled by looking at executed_volume
+                if order and order.get('executed_volume') and float(order.get('executed_volume', "0")) > 0:
+                    print(f"[{thread_name}] Buy order {order_uuid} was partially or fully filled (executed: {order.get('executed_volume')}). Setting position to 'buy' to attempt sell.")
+                    position = "buy" # Some filled, prepare to sell
+                else:
+                    print(f"[{thread_name}] Buy order {order_uuid} was not filled (executed: {order.get('executed_volume', 'N/A')}). Setting position to 'sell' to re-attempt buy.")
+                    position = "sell" # Not filled, re-attempt buy by setting position to 'sell'
+                return order, position
+
             # print(f"[{thread_name}] Current order state: {state} for {order_uuid}, polling again in 1 second...")
             time.sleep(1)
             order = bithumb_api.get_order(order_uuid)
             state = order['state']
+            poll_count += 1
         print(f"[{thread_name}] Order {order_uuid} (Buy) completed with state: {state}. Details: {order}")
         return order, position
     else:
         print(f"[{thread_name}] Buy order placement failed for {ticker}. Response: {response}")
         return None, position
 
-def trade_continuously(bithumb_api_client, ticker, trade_amount, initial_position_preference='buy', action_delay_seconds=5):
+def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_seconds=1):
     thread_name = threading.current_thread().name
-    print(f"[{thread_name}] Starting continuous trading for {ticker}. Initial preference: {initial_position_preference}, Action delay: {action_delay_seconds}s")
+    print(f"[{thread_name}] Starting continuous trading for {ticker}. Action delay: {action_delay_seconds}s")
     
     current_position = None  # None: 초기 상태, "buy": 매수 포지션, "sell": 매도 포지션
     last_buy_price = None
@@ -147,20 +163,22 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, initial_positio
 def main():
     bithumb_api_client = Bithumb(os.getenv("BITHUMB_ACCESS_KEY"), os.getenv("BITHUMB_SECRET_KEY"))
     
-    usdt_trade_amount = 10
-    xrp_trade_amount = 10
+    # .env 파일에서 거래 관련 설정값 로드
+    usdt_trade_amount = float(os.getenv("USDT_TRADE_AMOUNT", "10")) # 기본값 10 USDT
+    xrp_trade_amount = float(os.getenv("XRP_TRADE_AMOUNT", "10"))   # 기본값 10 XRP
     # 각 스레드 내의 개별 매수/매도 액션 후 대기 시간
     # API 호출 빈도 및 시장 상황에 맞춰 조절 필요
-    action_delay = 1 
+    action_delay_seconds = int(os.getenv("ACTION_DELAY_SECONDS", "1")) # 기본값 1초
 
     print("Starting continuous multi-threaded trading bot...")
+    print(f"USDT Trade Amount: {usdt_trade_amount}, XRP Trade Amount: {xrp_trade_amount}, Action Delay: {action_delay_seconds}s")
 
     usdt_thread = threading.Thread(target=trade_continuously, 
-                                   args=(bithumb_api_client, "KRW-USDT", usdt_trade_amount, 'buy', action_delay),
+                                   args=(bithumb_api_client, "KRW-USDT", usdt_trade_amount, action_delay_seconds),
                                    name="USDT-Trader")
     
     xrp_thread = threading.Thread(target=trade_continuously, 
-                                  args=(bithumb_api_client, "KRW-XRP", xrp_trade_amount, 'buy', action_delay), 
+                                  args=(bithumb_api_client, "KRW-XRP", xrp_trade_amount, action_delay_seconds),
                                   name="XRP-Trader")
 
     usdt_thread.start()
