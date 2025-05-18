@@ -56,15 +56,33 @@ def place_buy_order_and_wait(bithumb_api, ticker, price, volume):
 
         while state != 'done':
             if poll_count >= max_polls:
-                log_with_timestamp(f"[{thread_name}] Buy order {order_uuid} for {ticker} did not complete within {max_polls} polls. Last known state: {state}. Details: {order}")
-                # Check if any part of the order was filled by looking at executed_volume
-                if order and order.get('executed_volume') and float(order.get('executed_volume', "0")) > 0:
-                    log_with_timestamp(f"[{thread_name}] Buy order {order_uuid} was partially or fully filled (executed: {order.get('executed_volume')}). Setting position to 'buy' to attempt sell.")
-                    position = "buy" # Some filled, prepare to sell
+                log_with_timestamp(f"[{thread_name}] Buy order {order_uuid} for {ticker} (Original Price: {price}) did not complete within {max_polls} polls. Checking current market bid price...")
+
+                current_orderbook = python_bithumb.get_orderbook(ticker)
+
+                if current_orderbook and current_orderbook.get('orderbook_units') and len(current_orderbook['orderbook_units']) > 0:
+                    current_bid_price_str = current_orderbook['orderbook_units'][0]['bid_price']
+                    log_with_timestamp(f"[{thread_name}] Original buy price for {order_uuid}: {price}, Current market bid price for {ticker}: {current_bid_price_str}")
+
+                    if float(current_bid_price_str) == float(price):
+                        log_with_timestamp(f"[{thread_name}] Market bid price ({current_bid_price_str}) is same as order price ({price}). Resetting poll count for order {order_uuid}.")
+                        poll_count = 0
+                        # Re-fetch order details in case it completed just now or state changed
+                        order = bithumb_api.get_order(order_uuid)
+                        state = order['state']
+                        continue # Continue polling the same order
+                    else:
+                        log_with_timestamp(f"[{thread_name}] Market bid price ({current_bid_price_str}) differs from order price ({price}). Attempting to cancel order {order_uuid} for {ticker}.")
+                        cancel_status = bithumb_api.cancel_order(order_uuid)
+                        log_with_timestamp(f"[{thread_name}] Cancel order {order_uuid} attempt status: {cancel_status}. Setting position to 'sell' to place a new buy order.")
+                        position = "sell" # To re-attempt buy with new price via trade_continuously
+                        return order, position
                 else:
-                    log_with_timestamp(f"[{thread_name}] Buy order {order_uuid} was not filled (executed: {order.get('executed_volume', 'N/A')}). Setting position to 'sell' to re-attempt buy.")
-                    position = "sell" # Not filled, re-attempt buy by setting position to 'sell'
-                return order, position
+                    log_with_timestamp(f"[{thread_name}] Failed to fetch current orderbook for {ticker} or orderbook empty. Proceeding to cancel order {order_uuid} as a fallback.")
+                    cancel_status = bithumb_api.cancel_order(order_uuid)
+                    log_with_timestamp(f"[{thread_name}] Fallback cancel order {order_uuid} attempt status: {cancel_status}. Setting position to 'sell' to place a new buy order.")
+                    position = "sell" # To re-attempt buy via trade_continuously
+                    return order, position
 
             # log_with_timestamp(f"[{thread_name}] Current order state: {state} for {order_uuid}, polling again in 1 second...")
             time.sleep(1)
