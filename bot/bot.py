@@ -6,6 +6,7 @@ from python_bithumb.private_api import Bithumb
 import time
 import threading
 from datetime import datetime
+import numpy as np
 
 def log_with_timestamp(message):
     print(f"{datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')} {message}")
@@ -95,6 +96,55 @@ def place_buy_order_and_wait(bithumb_api, ticker, price, volume):
         log_with_timestamp(f"[{thread_name}] Buy order placement failed for {ticker}. Response: {response}")
         return None, position
 
+def check_buy_conditions(ticker: str, bid_price: float) -> bool:
+    """
+    매수 조건을 확인하는 함수
+
+    Parameters
+    ----------
+    ticker : str
+        마켓 코드 (예: "KRW-BTC")
+    bid_price : float
+        orderbook에서 가져온 매수 가격
+
+    Returns
+    -------
+    bool
+        매수 가능 여부 (True: 매수 가능, False: 매수 불가)
+    """
+    try:
+        # .env에서 설정값 로드
+        candle_interval = os.getenv("CANDLE_INTERVAL", "minute60")
+        candle_count = int(os.getenv("CANDLE_COUNT", "24"))
+        percentile_threshold = float(os.getenv("PERCENTILE_THRESHOLD", "70"))
+
+        # 캔들 데이터 가져오기
+        df = get_candles(ticker, interval=candle_interval, count=candle_count)
+        if df is None or df.empty:
+            log_with_timestamp(f"Warning: No candle data available for {ticker}")
+            return False
+
+        # 백분위 가격 계산
+        percentile_price = calculate_percentile(df, percentile_threshold)
+        if percentile_price is None:
+            log_with_timestamp(f"Warning: Could not calculate {percentile_threshold}th percentile for {ticker}")
+            return False
+
+        # 매수 조건 확인 (orderbook의 매수 가격이 백분위 가격보다 낮거나 같을 때)
+        can_buy = bid_price <= percentile_price
+
+        # 로깅
+        log_with_timestamp(f"\n=== Buy Condition Check for {ticker} ===")
+        log_with_timestamp(f"Orderbook Bid Price: {bid_price:,.2f}")
+        log_with_timestamp(f"{percentile_threshold}th Percentile Price: {percentile_price:,.2f}")
+        log_with_timestamp(f"Can Buy: {can_buy}")
+
+        return can_buy
+
+    except Exception as e:
+        log_with_timestamp(f"Error checking buy conditions for {ticker}: {e}")
+        return False
+
 def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_seconds=1):
     thread_name = threading.current_thread().name
     log_with_timestamp(f"[{thread_name}] Starting continuous trading for {ticker}. Action delay: {action_delay_seconds}s")
@@ -141,14 +191,21 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
             elif current_position == "sell" or current_position is None: # 매수 시도
                 action_type = "Initial Buy" if current_position is None else "Buy (after sell)"
                 log_with_timestamp(f"[{thread_name}] Current position for {ticker} is '{current_position}'. Attempting {action_type}.")
+
                 orderbook = python_bithumb.get_orderbook(ticker)
                 if not orderbook or not orderbook.get('orderbook_units'):
                     log_with_timestamp(f"[{thread_name}] Failed to fetch orderbook for {ticker} to buy. Retrying after delay...")
                     time.sleep(action_delay_seconds)
                     continue
                 
-                price_for_buy = orderbook['orderbook_units'][0]['bid_price']
+                price_for_buy = float(orderbook['orderbook_units'][0]['bid_price'])
                 log_with_timestamp(f"[{thread_name}] Current bid price for {ticker} (maker): {price_for_buy}")
+
+                # 매수 조건 확인 (orderbook의 매수 가격과 백분위 가격 비교)
+                if not check_buy_conditions(ticker, price_for_buy):
+                    log_with_timestamp(f"[{thread_name}] Buy conditions not met for {ticker}. Waiting for next check...")
+                    time.sleep(action_delay_seconds)
+                    continue
 
                 final_order, new_position = place_buy_order_and_wait(bithumb_api_client, ticker, price_for_buy, trade_amount)
                 if final_order and new_position == "buy":
@@ -181,6 +238,67 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
         except Exception as e:
             log_with_timestamp(f"[{thread_name}] An error occurred in trading loop for {ticker}: {e}. Retrying after delay...")
             time.sleep(action_delay_seconds)
+
+def get_candles(ticker: str, interval: str = "day", count: int = 200):
+    """
+    캔들차트 데이터를 가져오는 함수
+
+    Parameters
+    ----------
+    ticker : str
+        마켓 코드 (예: "KRW-BTC")
+    interval : str, optional
+        캔들 간격 ("day", "week", "month", "minute1", "minute3", "minute5", "minute10", "minute15", "minute30", "minute60", "minute240")
+    count : int, optional
+        가져올 캔들 개수 (최대 200)
+
+    Returns
+    -------
+    pandas.DataFrame
+        캔들 데이터가 담긴 DataFrame. 컬럼: open, high, low, close, volume, value
+    """
+    try:
+        df = python_bithumb.get_ohlcv(ticker, interval=interval, count=count)
+        if df.empty:
+            log_with_timestamp(f"Warning: No candle data returned for {ticker}")
+            return None
+        return df
+    except Exception as e:
+        log_with_timestamp(f"Error fetching candles for {ticker}: {e}")
+        return None
+
+def calculate_percentile(df, percentile: float):
+    """
+    캔들 데이터의 종가를 기준으로 특정 백분위의 가격을 계산하는 함수
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        get_candles() 함수로 가져온 캔들 데이터
+    percentile : float
+        계산할 백분위 (0-100 사이의 값)
+
+    Returns
+    -------
+    float or None
+        해당 백분위의 가격. 데이터가 없거나 오류 발생 시 None 반환
+    """
+    try:
+        if df is None or df.empty:
+            return None
+
+        # 종가(close) 기준으로 정렬
+        sorted_prices = np.sort(df['close'].values)
+
+        # 백분위 계산
+        percentile_index = int(len(sorted_prices) * (percentile / 100))
+        if percentile_index >= len(sorted_prices):
+            percentile_index = len(sorted_prices) - 1
+
+        return float(sorted_prices[percentile_index])
+    except Exception as e:
+        log_with_timestamp(f"Error calculating {percentile}th percentile: {e}")
+        return None
 
 def main():
     bithumb_api_client = Bithumb(os.getenv("BITHUMB_ACCESS_KEY"), os.getenv("BITHUMB_SECRET_KEY"))
