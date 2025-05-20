@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PROCESS_NAME="python3 -u bot.py"
+PROCESS_NAME="python3 -u bot/bot.py"
 
 echo "Attempting to stop process: $PROCESS_NAME"
 
