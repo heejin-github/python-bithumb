@@ -343,6 +343,7 @@ def main():
     usdt_trade_amount = float(os.getenv("USDT_TRADE_AMOUNT", "10")) # 기본값 10 USDT
     xrp_trade_amount = float(os.getenv("XRP_TRADE_AMOUNT", "10"))   # 기본값 10 XRP
     btc_trade_amount = float(os.getenv("BTC_TRADE_AMOUNT", "0.001")) # 기본값 0.001 BTC
+    moodeng_trade_amount = float(os.getenv("MOODENG_TRADE_AMOUNT", "100")) # 기본값 100 MOODENG
     # 각 스레드 내의 개별 매수/매도 액션 후 대기 시간
     # API 호출 빈도 및 시장 상황에 맞춰 조절 필요
     action_delay_seconds = int(os.getenv("ACTION_DELAY_SECONDS", "1")) # 기본값 1초
@@ -357,6 +358,8 @@ def main():
         trading_assets.append(("XRP-Trader", "KRW-XRP", xrp_trade_amount))
     if btc_trade_amount > 0:
         trading_assets.append(("BTC-Trader", "KRW-BTC", btc_trade_amount))
+    if moodeng_trade_amount > 0:
+        trading_assets.append(("MOODENG-Trader", "KRW-MOODENG", moodeng_trade_amount))
 
     # 거래할 자산이 없는 경우
     if not trading_assets:
