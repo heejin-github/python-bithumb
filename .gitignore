@@ -3,3 +3,5 @@ build
 dist
 venv
 output.log
+.venv
+__pycache__

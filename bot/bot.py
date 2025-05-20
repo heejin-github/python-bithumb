@@ -306,28 +306,50 @@ def main():
     # .env 파일에서 거래 관련 설정값 로드
     usdt_trade_amount = float(os.getenv("USDT_TRADE_AMOUNT", "10")) # 기본값 10 USDT
     xrp_trade_amount = float(os.getenv("XRP_TRADE_AMOUNT", "10"))   # 기본값 10 XRP
+    btc_trade_amount = float(os.getenv("BTC_TRADE_AMOUNT", "0.001")) # 기본값 0.001 BTC
     # 각 스레드 내의 개별 매수/매도 액션 후 대기 시간
     # API 호출 빈도 및 시장 상황에 맞춰 조절 필요
     action_delay_seconds = int(os.getenv("ACTION_DELAY_SECONDS", "1")) # 기본값 1초
 
     log_with_timestamp("Starting continuous multi-threaded trading bot...")
-    log_with_timestamp(f"USDT Trade Amount: {usdt_trade_amount}, XRP Trade Amount: {xrp_trade_amount}, Action Delay: {action_delay_seconds}s")
-
-    usdt_thread = threading.Thread(target=trade_continuously, 
-                                   args=(bithumb_api_client, "KRW-USDT", usdt_trade_amount, action_delay_seconds),
-                                   name="USDT-Trader")
     
-    xrp_thread = threading.Thread(target=trade_continuously, 
-                                  args=(bithumb_api_client, "KRW-XRP", xrp_trade_amount, action_delay_seconds),
-                                  name="XRP-Trader")
+    # 거래할 자산 목록 생성 (거래량이 0보다 큰 자산만 포함)
+    trading_assets = []
+    if usdt_trade_amount > 0:
+        trading_assets.append(("USDT-Trader", "KRW-USDT", usdt_trade_amount))
+    if xrp_trade_amount > 0:
+        trading_assets.append(("XRP-Trader", "KRW-XRP", xrp_trade_amount))
+    if btc_trade_amount > 0:
+        trading_assets.append(("BTC-Trader", "KRW-BTC", btc_trade_amount))
 
-    usdt_thread.start()
-    time.sleep(1) # 두번째 스레드 시작 전 약간의 딜레이 (선택적)
-    xrp_thread.start()
+    # 거래할 자산이 없는 경우
+    if not trading_assets:
+        log_with_timestamp("No trading assets configured. Please set trade amounts greater than 0 in .env file.")
+        return
+
+    # 거래 설정 로깅
+    log_message = "Trading configuration:"
+    for _, ticker, amount in trading_assets:
+        log_message += f"\n{ticker}: {amount}"
+    log_message += f"\nAction Delay: {action_delay_seconds}s"
+    log_with_timestamp(log_message)
+
+    # 거래 스레드 생성 및 시작
+    trading_threads = []
+    for thread_name, ticker, amount in trading_assets:
+        thread = threading.Thread(
+            target=trade_continuously,
+            args=(bithumb_api_client, ticker, amount, action_delay_seconds),
+            name=thread_name
+        )
+        trading_threads.append(thread)
+        thread.start()
+        time.sleep(1)  # 각 스레드 시작 사이에 1초 딜레이
 
     try:
-        usdt_thread.join() # 주 스레드는 자식 스레드가 끝날 때까지 (Ctrl+C 입력 시까지) 대기
-        xrp_thread.join()
+        # 모든 스레드가 종료될 때까지 대기
+        for thread in trading_threads:
+            thread.join()
     except KeyboardInterrupt:
         log_with_timestamp("\nBot stopping due to KeyboardInterrupt...")
         # 스레드가 정상적으로 종료될 시간을 줄 수도 있지만, 데몬 스레드가 아니므로 
