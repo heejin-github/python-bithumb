@@ -198,11 +198,11 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
                     time.sleep(action_delay_seconds)
                     continue
                 
-                price_for_buy = float(orderbook['orderbook_units'][0]['bid_price'])
+                price_for_buy = orderbook['orderbook_units'][0]['bid_price']
                 log_with_timestamp(f"[{thread_name}] Current bid price for {ticker} (maker): {price_for_buy}")
 
                 # 매수 조건 확인 (orderbook의 매수 가격과 백분위 가격 비교)
-                if not check_buy_conditions(ticker, price_for_buy):
+                if not check_buy_conditions(ticker, float(price_for_buy)):
                     log_with_timestamp(f"[{thread_name}] Buy conditions not met for {ticker}. Waiting for next check...")
                     time.sleep(action_delay_seconds)
                     continue
