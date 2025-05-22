@@ -78,18 +78,22 @@ def place_buy_order_and_wait(bithumb_api, ticker, price, volume):
                         # 시장 가격이 변경된 경우, 남은 수량 취소 처리
                         remaining_volume = float(order.get('remaining_volume', 0))
                         if remaining_volume > 0:
+                            # 취소 전에 현재까지의 체결 수량 저장
+                            last_known_executed_volume = float(order.get('executed_volume', 0))
+
                             log_with_timestamp(f"[{thread_name}] Market bid price ({current_bid_price_str}) differs from order price ({price}). Attempting to cancel remaining volume ({remaining_volume}) for order {order_uuid}.")
                             cancel_status = bithumb_api.cancel_order(order_uuid)
-                            log_with_timestamp(f"[{thread_name}] Cancel order {order_uuid} attempt status: {cancel_status}.")
-                            if current_executed_volume > 0:
+                            log_with_timestamp(f"[{thread_name}] Cancel order {order_uuid} attempt status: {cancel_status}")
+
+                            if last_known_executed_volume > 0:
                                 # 부분 체결된 경우, 체결된 수량만큼 매도 시도
-                                log_with_timestamp(f"[{thread_name}] Selling executed volume ({current_executed_volume}) from partially filled order.")
-                                sell_order, _ = place_sell_order_and_wait(bithumb_api, ticker, current_bid_price_str, current_executed_volume)
+                                log_with_timestamp(f"[{thread_name}] Selling executed volume ({last_known_executed_volume}) from partially filled order.")
+                                sell_order, _ = place_sell_order_and_wait(bithumb_api, ticker, current_bid_price_str, last_known_executed_volume)
                                 if sell_order:
-                                    log_with_timestamp(f"[{thread_name}] Successfully sold {current_executed_volume} {ticker} from partially filled order.")
+                                    log_with_timestamp(f"[{thread_name}] Successfully sold {last_known_executed_volume} {ticker} from partially filled order.")
                                     position = "sell"
                                 else:
-                                    log_with_timestamp(f"[{thread_name}] Failed to sell {current_executed_volume} {ticker} from partially filled order.")
+                                    log_with_timestamp(f"[{thread_name}] Failed to sell {last_known_executed_volume} {ticker} from partially filled order.")
                             else:
                                 # 체결된 수량이 없는 경우, 포지션 초기화
                                 log_with_timestamp(f"[{thread_name}] No executed volume for order {order_uuid}. Resetting position to None.")
