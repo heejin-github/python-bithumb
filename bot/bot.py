@@ -202,17 +202,77 @@ def check_buy_conditions(ticker: str, bid_price: float) -> bool:
         log_with_timestamp(f"Error checking buy conditions for {ticker}: {e}")
         return False
 
+def check_emergency_sell_conditions(ticker: str) -> bool:
+    """
+    긴급 매도(손절) 조건을 확인하는 함수
+
+    Parameters
+    ----------
+    ticker : str
+        마켓 코드 (예: "KRW-BTC")
+
+    Returns
+    -------
+    bool
+        긴급 매도 필요 여부 (True: 긴급 매도 필요, False: 긴급 매도 불필요)
+    """
+    try:
+        # 1분봉 5개 데이터 가져오기
+        one_min_df = get_candles(ticker, interval="minute1", count=5)
+        if one_min_df is not None and not one_min_df.empty:
+            # 모든 캔들이 하락인지 확인 (open > close)
+            all_down = all(one_min_df['open'] > one_min_df['close'])
+            if all_down:
+                log_with_timestamp(f"Warning: Last 5 1-minute candles are all down for {ticker}. Emergency sell needed.")
+                return True
+        return False
+    except Exception as e:
+        log_with_timestamp(f"Error checking emergency sell conditions for {ticker}: {e}")
+        return False
+
 def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_seconds=1):
     thread_name = threading.current_thread().name
     log_with_timestamp(f"[{thread_name}] Starting continuous trading for {ticker}. Action delay: {action_delay_seconds}s")
     
     current_position = None  # None: 초기 상태, "buy": 매수 포지션, "sell": 매도 포지션
     last_buy_price = None
+    last_buy_volume = None  # 마지막 매수 수량 저장
 
     while True:
         try:
             if current_position == "buy": # 매도 시도
                 log_with_timestamp(f"[{thread_name}] Current position for {ticker} is 'buy'. Attempting to sell.")
+
+                # 긴급 매도 조건 확인
+                if check_emergency_sell_conditions(ticker):
+                    log_with_timestamp(f"[{thread_name}] Emergency sell conditions met for {ticker}. Attempting market sell.")
+                    try:
+                        # 시장가 매도 주문
+                        response = bithumb_api_client.sell_market_order(ticker, last_buy_volume)
+                        if response and response.get('uuid'):
+                            order_uuid = response['uuid']
+                            order = bithumb_api_client.get_order(order_uuid)
+
+                            # 거래 정보 로깅
+                            executed_price = float(order.get('avg_price', 0))
+                            executed_volume = float(order.get('executed_volume', 0))
+                            loss_amount = (last_buy_price - executed_price) * executed_volume
+
+                            log_with_timestamp(f"\n=== Emergency Sell Details for {ticker} ===")
+                            log_with_timestamp(f"Buy Price: {last_buy_price:,.2f}")
+                            log_with_timestamp(f"Sell Price: {executed_price:,.2f}")
+                            log_with_timestamp(f"Volume: {executed_volume:,.8f}")
+                            log_with_timestamp(f"Loss Amount: {loss_amount:,.2f} KRW")
+
+                            current_position = None
+                            last_buy_price = None
+                            last_buy_volume = None
+                            continue
+                    except Exception as e:
+                        log_with_timestamp(f"[{thread_name}] Error during emergency sell for {ticker}: {e}")
+                        time.sleep(action_delay_seconds)
+                        continue
+
                 orderbook = python_bithumb.get_orderbook(ticker)
                 if not orderbook or not orderbook.get('orderbook_units'):
                     log_with_timestamp(f"[{thread_name}] Failed to fetch orderbook for {ticker} to sell. Retrying after delay...")
@@ -278,6 +338,12 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
                             log_with_timestamp(f"[{thread_name}] Stored last buy price for {ticker}: {last_buy_price} (from order price as fallback)")    
                         else:
                              log_with_timestamp(f"[{thread_name}] Warning: Could not determine executed price for {ticker} from order details to store last_buy_price.")
+
+                        # 매수 수량 저장
+                        executed_volume = float(final_order.get('executed_volume', 0))
+                        if executed_volume > 0:
+                            last_buy_volume = executed_volume
+                            log_with_timestamp(f"[{thread_name}] Stored last buy volume for {ticker}: {last_buy_volume}")
                     except (ValueError, TypeError, KeyError) as e:
                         log_with_timestamp(f"[{thread_name}] Error parsing price from buy order for {ticker}: {e}")
                     log_with_timestamp(f"[{thread_name}] Buy successful for {ticker}. New position: {current_position}, Last buy price: {last_buy_price}")
