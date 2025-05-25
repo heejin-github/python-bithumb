@@ -179,6 +179,17 @@ def check_buy_conditions(ticker: str, bid_price: float) -> bool:
         # 매수 조건 확인 (orderbook의 매수 가격이 백분위 가격보다 낮거나 같을 때)
         can_buy = bid_price <= percentile_price
 
+        # 연속 하락 여부 확인
+        if can_buy:
+            # 1분봉 5개 데이터 가져오기
+            one_min_df = get_candles(ticker, interval="minute1", count=5)
+            if one_min_df is not None and not one_min_df.empty:
+                # 모든 캔들이 하락인지 확인 (open > close)
+                all_down = all(one_min_df['open'] > one_min_df['close'])
+                if all_down:
+                    log_with_timestamp(f"Warning: Last 5 1-minute candles are all down for {ticker}. Skipping buy.")
+                    can_buy = False
+
         # 로깅
         log_with_timestamp(f"\n=== Buy Condition Check for {ticker} ===")
         log_with_timestamp(f"Orderbook Bid Price: {bid_price:,.2f}")
