@@ -25,10 +25,46 @@ def place_sell_order_and_wait(bithumb_api, ticker, price, volume):
         order_uuid = response['uuid']
         order = bithumb_api.get_order(order_uuid)
         state = order['state']
+
         while state != 'done':
+            # 긴급 매도 조건 확인
+            if check_emergency_sell_conditions(ticker):
+                log_with_timestamp(f"[{thread_name}] Emergency sell conditions detected while waiting for sell order. Canceling current order and executing market sell.")
+                try:
+                    # 현재 주문 취소
+                    cancel_status = bithumb_api.cancel_order(order_uuid)
+                    log_with_timestamp(f"[{thread_name}] Cancel order {order_uuid} attempt status: {cancel_status}")
+
+                    # 시장가 매도 주문
+                    market_sell_response = bithumb_api.sell_market_order(ticker, volume)
+                    if market_sell_response and market_sell_response.get('uuid'):
+                        market_order_uuid = market_sell_response['uuid']
+                        market_order = bithumb_api.get_order(market_order_uuid)
+
+                        # 거래 정보 로깅
+                        executed_price = float(market_order.get('avg_price', 0))
+                        executed_volume = float(market_order.get('executed_volume', 0))
+
+                        log_with_timestamp(f"\n=== Emergency Market Sell Details for {ticker} ===")
+                        log_with_timestamp(f"Original Limit Order Price: {price:,.2f}")
+                        log_with_timestamp(f"Market Sell Price: {executed_price:,.2f}")
+                        log_with_timestamp(f"Volume: {executed_volume:,.8f}")
+
+                        # 매수 가격이 저장되어 있다면 손실 금액도 계산
+                        if hasattr(threading.current_thread(), 'last_buy_price') and threading.current_thread().last_buy_price:
+                            loss_amount = (threading.current_thread().last_buy_price - executed_price) * executed_volume
+                            log_with_timestamp(f"Loss Amount: {loss_amount:,.2f} KRW")
+
+                        position = None
+                        return market_order, position
+                except Exception as e:
+                    log_with_timestamp(f"[{thread_name}] Error during emergency market sell: {e}")
+                    # 에러 발생 시 기존 주문 계속 진행
+
             time.sleep(1)
             order = bithumb_api.get_order(order_uuid)
             state = order['state']
+
         log_with_timestamp(f"[{thread_name}] Order {order_uuid} (Sell) completed with state: {state}. Details: {order}")
         # 매도 주문 체결 후 cooldown time 적용
         cooldown_seconds = int(os.getenv("ORDER_COOLDOWN_SECONDS", "5"))  # 기본값 5초
@@ -237,6 +273,9 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
     current_position = None  # None: 초기 상태, "buy": 매수 포지션, "sell": 매도 포지션
     last_buy_price = None
     last_buy_volume = None  # 마지막 매수 수량 저장
+
+    # 스레드에 last_buy_price 저장
+    threading.current_thread().last_buy_price = None
 
     while True:
         try:
