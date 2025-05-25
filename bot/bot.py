@@ -22,17 +22,18 @@ def place_sell_order_and_wait(bithumb_api, ticker, price, volume):
     if response and response.get('uuid'):
         position = "sell"
         log_with_timestamp(f"[{thread_name}] Sell order placed successfully. UUID: {response['uuid']}. Current position: {position}")
-        # log_with_timestamp(f"[{thread_name}] Response details: {response}") # 상세 로그 필요시 주석 해제
         order_uuid = response['uuid']
         order = bithumb_api.get_order(order_uuid)
-        # log_with_timestamp(f"[{thread_name}] Initial order details: {order}")
         state = order['state']
         while state != 'done':
-            # log_with_timestamp(f"[{thread_name}] Current order state: {state} for {order_uuid}, polling again in 1 second...") # 상세 폴링 로그 필요시 주석 해제
             time.sleep(1)
             order = bithumb_api.get_order(order_uuid)
             state = order['state']
         log_with_timestamp(f"[{thread_name}] Order {order_uuid} (Sell) completed with state: {state}. Details: {order}")
+        # 매도 주문 체결 후 cooldown time 적용
+        cooldown_seconds = int(os.getenv("ORDER_COOLDOWN_SECONDS", "5"))  # 기본값 5초
+        log_with_timestamp(f"[{thread_name}] Applying cooldown time of {cooldown_seconds} seconds after sell order execution.")
+        time.sleep(cooldown_seconds)
         return order, position
     else:
         log_with_timestamp(f"[{thread_name}] Sell order placement failed for {ticker}. Response: {response}")
@@ -50,7 +51,7 @@ def place_buy_order_and_wait(bithumb_api, ticker, price, volume):
         order = bithumb_api.get_order(order_uuid)
         state = order['state']
         poll_count = 0
-        max_polls = 30
+        max_polls = int(os.getenv("MAX_POLLS", "30"))  # 기본값 30회
         last_executed_volume = 0.0
         while state != 'done':
             if poll_count >= max_polls:
@@ -129,6 +130,10 @@ def place_buy_order_and_wait(bithumb_api, ticker, price, volume):
         # 주문 완료 시 체결 여부 확인
         if state == 'done' and float(order.get('executed_volume', 0)) > 0:
             log_with_timestamp(f"[{thread_name}] Order {order_uuid} (Buy) completed with state: {state}. Details: {order}")
+            # 매수 주문 체결 후 cooldown time 적용
+            cooldown_seconds = int(os.getenv("ORDER_COOLDOWN_SECONDS", "5"))  # 기본값 5초
+            log_with_timestamp(f"[{thread_name}] Applying cooldown time of {cooldown_seconds} seconds after buy order execution.")
+            time.sleep(cooldown_seconds)
             return order, position
         else:
             log_with_timestamp(f"[{thread_name}] Order {order_uuid} completed but no execution. Resetting position to None.")
