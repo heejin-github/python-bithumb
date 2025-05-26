@@ -259,7 +259,16 @@ def check_emergency_sell_conditions(ticker: str) -> bool:
             # 모든 캔들이 하락인지 확인 (open > close)
             all_down = all(one_min_df['open'] > one_min_df['close'])
             if all_down:
-                log_with_timestamp(f"Warning: Last 5 1-minute candles are all down for {ticker}. Emergency sell needed.")
+                log_with_timestamp(f"\n=== Emergency Sell Condition Detected for {ticker} ===")
+                log_with_timestamp("Last 5 1-minute candles are all down. Detailed candle information:")
+
+                # 각 캔들의 정보를 시간순으로 출력
+                for idx, row in one_min_df.iterrows():
+                    log_with_timestamp(f"Time: {idx}")
+                    log_with_timestamp(f"  Open: {row['open']:,.2f}")
+                    log_with_timestamp(f"  Close: {row['close']:,.2f}")
+                    log_with_timestamp(f"  Change: {row['close'] - row['open']:,.2f} ({((row['close'] - row['open']) / row['open'] * 100):,.2f}%)")
+
                 return True
         return False
     except Exception as e:
