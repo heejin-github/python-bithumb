@@ -42,8 +42,14 @@ def place_sell_order_and_wait(bithumb_api, ticker, price, volume):
                         market_order = bithumb_api.get_order(market_order_uuid)
 
                         # 거래 정보 로깅
-                        executed_price = float(market_order.get('avg_price', 0))
                         executed_volume = float(market_order.get('executed_volume', 0))
+                        # trades 배열에서 평균 가격 계산
+                        trades = market_order.get('trades', [])
+                        if trades:
+                            total_funds = sum(float(trade['funds']) for trade in trades)
+                            executed_price = total_funds / executed_volume if executed_volume > 0 else 0
+                        else:
+                            executed_price = 0
 
                         log_with_timestamp(f"\n=== Emergency Market Sell Details for {ticker} ===")
                         log_with_timestamp(f"Original Limit Order Price: {price:,.2f}")
@@ -126,23 +132,44 @@ def place_buy_order_and_wait(bithumb_api, ticker, price, volume):
                             last_known_executed_volume = float(order.get('executed_volume', 0))
 
                             log_with_timestamp(f"[{thread_name}] Market bid price ({current_bid_price_str}) differs from order price ({price}). Attempting to cancel remaining volume ({remaining_volume}) for order {order_uuid}.")
-                            cancel_status = bithumb_api.cancel_order(order_uuid)
-                            log_with_timestamp(f"[{thread_name}] Cancel order {order_uuid} attempt status: {cancel_status}")
 
-                            if last_known_executed_volume > 0:
-                                # 부분 체결된 경우, 체결된 수량만큼 매도 시도
-                                log_with_timestamp(f"[{thread_name}] Selling executed volume ({last_known_executed_volume}) from partially filled order.")
-                                sell_order, _ = place_sell_order_and_wait(bithumb_api, ticker, current_bid_price_str, last_known_executed_volume)
-                                if sell_order:
-                                    log_with_timestamp(f"[{thread_name}] Successfully sold {last_known_executed_volume} {ticker} from partially filled order.")
-                                    position = "sell"
+                            # 취소 전에 한 번 더 주문 상태 확인
+                            try:
+                                final_check_order = bithumb_api.get_order(order_uuid)
+                                if final_check_order['state'] == 'done':
+                                    log_with_timestamp(f"[{thread_name}] Order {order_uuid} was completed before cancellation. Processing completed order.")
+                                    order = final_check_order
+                                    state = 'done'
+                                    break
+
+                                # 주문이 아직 진행 중인 경우에만 취소 시도
+                                cancel_status = bithumb_api.cancel_order(order_uuid)
+                                log_with_timestamp(f"[{thread_name}] Cancel order {order_uuid} attempt status: {cancel_status}")
+
+                                if last_known_executed_volume > 0:
+                                    # 부분 체결된 경우, 체결된 수량만큼 매도 시도
+                                    log_with_timestamp(f"[{thread_name}] Selling executed volume ({last_known_executed_volume}) from partially filled order.")
+                                    sell_order, _ = place_sell_order_and_wait(bithumb_api, ticker, current_bid_price_str, last_known_executed_volume)
+                                    if sell_order:
+                                        log_with_timestamp(f"[{thread_name}] Successfully sold {last_known_executed_volume} {ticker} from partially filled order.")
+                                        position = "sell"
+                                    else:
+                                        log_with_timestamp(f"[{thread_name}] Failed to sell {last_known_executed_volume} {ticker} from partially filled order.")
                                 else:
-                                    log_with_timestamp(f"[{thread_name}] Failed to sell {last_known_executed_volume} {ticker} from partially filled order.")
-                            else:
-                                # 체결된 수량이 없는 경우, 포지션 초기화
-                                log_with_timestamp(f"[{thread_name}] No executed volume for order {order_uuid}. Resetting position to None.")
-                                position = None
-                            return order, position
+                                    # 체결된 수량이 없는 경우, 포지션 초기화
+                                    log_with_timestamp(f"[{thread_name}] No executed volume for order {order_uuid}. Resetting position to None.")
+                                    position = None
+                                return order, position
+                            except Exception as e:
+                                if "order_not_found" in str(e):
+                                    # 주문이 이미 체결된 경우
+                                    log_with_timestamp(f"[{thread_name}] Order {order_uuid} was completed before cancellation. Processing completed order.")
+                                    state = 'done'
+                                    break
+                                else:
+                                    # 다른 에러의 경우
+                                    log_with_timestamp(f"[{thread_name}] Error during order cancellation: {e}")
+                                    raise
                         else:
                             log_with_timestamp(f"[{thread_name}] Order {order_uuid} is already fully executed.")
                             state = 'done'
@@ -150,22 +177,41 @@ def place_buy_order_and_wait(bithumb_api, ticker, price, volume):
                 else:
                     # 호가창 조회 실패 시 주문 취소 처리
                     log_with_timestamp(f"[{thread_name}] Failed to fetch current orderbook for {ticker} or orderbook empty. Proceeding to cancel order {order_uuid} as a fallback.")
-                    cancel_status = bithumb_api.cancel_order(order_uuid)
-                    log_with_timestamp(f"[{thread_name}] Fallback cancel order {order_uuid} attempt status: {cancel_status}.")
-                    if current_executed_volume > 0:
-                        # 부분 체결된 경우, 체결된 수량만큼 매도 시도
-                        log_with_timestamp(f"[{thread_name}] Selling executed volume ({current_executed_volume}) from partially filled order.")
-                        sell_order, _ = place_sell_order_and_wait(bithumb_api, ticker, price, current_executed_volume)
-                        if sell_order:
-                            log_with_timestamp(f"[{thread_name}] Successfully sold {current_executed_volume} {ticker} from partially filled order.")
-                            position = "sell"
+                    try:
+                        # 취소 전에 한 번 더 주문 상태 확인
+                        final_check_order = bithumb_api.get_order(order_uuid)
+                        if final_check_order['state'] == 'done':
+                            log_with_timestamp(f"[{thread_name}] Order {order_uuid} was completed before cancellation. Processing completed order.")
+                            order = final_check_order
+                            state = 'done'
+                            break
+
+                        cancel_status = bithumb_api.cancel_order(order_uuid)
+                        log_with_timestamp(f"[{thread_name}] Fallback cancel order {order_uuid} attempt status: {cancel_status}.")
+                        if current_executed_volume > 0:
+                            # 부분 체결된 경우, 체결된 수량만큼 매도 시도
+                            log_with_timestamp(f"[{thread_name}] Selling executed volume ({current_executed_volume}) from partially filled order.")
+                            sell_order, _ = place_sell_order_and_wait(bithumb_api, ticker, price, current_executed_volume)
+                            if sell_order:
+                                log_with_timestamp(f"[{thread_name}] Successfully sold {current_executed_volume} {ticker} from partially filled order.")
+                                position = "sell"
+                            else:
+                                log_with_timestamp(f"[{thread_name}] Failed to sell {current_executed_volume} {ticker} from partially filled order.")
                         else:
-                            log_with_timestamp(f"[{thread_name}] Failed to sell {current_executed_volume} {ticker} from partially filled order.")
-                    else:
-                        # 체결된 수량이 없는 경우, 포지션 초기화
-                        log_with_timestamp(f"[{thread_name}] No executed volume for order {order_uuid}. Resetting position to None.")
-                        position = None
-                    return order, position
+                            # 체결된 수량이 없는 경우, 포지션 초기화
+                            log_with_timestamp(f"[{thread_name}] No executed volume for order {order_uuid}. Resetting position to None.")
+                            position = None
+                        return order, position
+                    except Exception as e:
+                        if "order_not_found" in str(e):
+                            # 주문이 이미 체결된 경우
+                            log_with_timestamp(f"[{thread_name}] Order {order_uuid} was completed before cancellation. Processing completed order.")
+                            state = 'done'
+                            break
+                        else:
+                            # 다른 에러의 경우
+                            log_with_timestamp(f"[{thread_name}] Error during fallback order cancellation: {e}")
+                            raise
             time.sleep(1)
             order = bithumb_api.get_order(order_uuid)
             state = order['state']
@@ -309,15 +355,23 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
                             order = bithumb_api_client.get_order(order_uuid)
 
                             # 거래 정보 로깅
-                            executed_price = float(order.get('avg_price', 0))
                             executed_volume = float(order.get('executed_volume', 0))
-                            loss_amount = (last_buy_price - executed_price) * executed_volume
+                            # trades 배열에서 평균 가격 계산
+                            trades = order.get('trades', [])
+                            if trades:
+                                total_funds = sum(float(trade['funds']) for trade in trades)
+                                executed_price = total_funds / executed_volume if executed_volume > 0 else 0
+                            else:
+                                executed_price = 0
 
                             log_with_timestamp(f"\n=== Emergency Sell Details for {ticker} ===")
                             log_with_timestamp(f"Buy Price: {last_buy_price:,.2f}")
                             log_with_timestamp(f"Sell Price: {executed_price:,.2f}")
                             log_with_timestamp(f"Volume: {executed_volume:,.8f}")
-                            log_with_timestamp(f"Loss Amount: {loss_amount:,.2f} KRW")
+
+                            if last_buy_price is not None:
+                                loss_amount = (last_buy_price - executed_price) * executed_volume
+                                log_with_timestamp(f"Loss Amount: {loss_amount:,.2f} KRW")
 
                             # 매도 성공 시에만 포지션 초기화
                             current_position = None
@@ -357,8 +411,15 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
                     final_order, new_position = place_sell_order_and_wait(bithumb_api_client, ticker, price_for_sell, trade_amount)
                     if final_order and new_position == "sell":
                         current_position = "sell"
-                        # last_buy_price는 매도 성공 시 초기화하지 않음. 다음 매수때까지 유지.
                         log_with_timestamp(f"[{thread_name}] Sell successful for {ticker}. New position: {current_position}")
+                    elif final_order and new_position is None:
+                        # emergency sell 등으로 포지션이 초기화된 경우
+                        current_position = None
+                        last_buy_price = None
+                        last_buy_volume = None
+                        threading.current_thread().last_buy_price = None
+                        threading.current_thread().last_buy_volume = None
+                        log_with_timestamp(f"[{thread_name}] Emergency sell or forced position reset. New position: {current_position}")
                     else:
                         log_with_timestamp(f"[{thread_name}] Sell attempt for {ticker} failed or did not complete as expected. Retrying after delay...")
                         # current_position은 "buy"로 유지하고 재시도
@@ -387,19 +448,24 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
                 if final_order and new_position == "buy":
                     current_position = "buy"
                     try:
-                        avg_price_str = final_order.get('avg_price')
-                        order_price_str = final_order.get('price') # 지정가 주문시 입력한 가격
-                        if avg_price_str and avg_price_str != "0":
-                            last_buy_price = float(avg_price_str)
-                            log_with_timestamp(f"[{thread_name}] Stored last buy price for {ticker}: {last_buy_price} (from avg_price)")
-                        elif order_price_str : # avg_price가 없을 경우 주문 가격을 사용
-                            last_buy_price = float(order_price_str)
-                            log_with_timestamp(f"[{thread_name}] Stored last buy price for {ticker}: {last_buy_price} (from order price as fallback)")    
+                        # trades 배열에서 평균 가격 계산
+                        trades = final_order.get('trades', [])
+                        executed_volume = float(final_order.get('executed_volume', 0))
+
+                        if trades and executed_volume > 0:
+                            total_funds = sum(float(trade['funds']) for trade in trades)
+                            last_buy_price = total_funds / executed_volume
+                            log_with_timestamp(f"[{thread_name}] Stored last buy price for {ticker}: {last_buy_price:,.2f} (calculated from trades)")
                         else:
-                             log_with_timestamp(f"[{thread_name}] Warning: Could not determine executed price for {ticker} from order details to store last_buy_price.")
+                            # trades 정보가 없는 경우 주문 가격을 사용
+                            order_price_str = final_order.get('price')
+                            if order_price_str:
+                                last_buy_price = float(order_price_str)
+                                log_with_timestamp(f"[{thread_name}] Stored last buy price for {ticker}: {last_buy_price:,.2f} (from order price as fallback)")
+                            else:
+                                log_with_timestamp(f"[{thread_name}] Warning: Could not determine executed price for {ticker} from order details.")
 
                         # 매수 수량 저장
-                        executed_volume = float(final_order.get('executed_volume', 0))
                         if executed_volume > 0:
                             last_buy_volume = executed_volume
                             threading.current_thread().last_buy_volume = executed_volume
