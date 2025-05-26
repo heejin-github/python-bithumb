@@ -55,11 +55,18 @@ def place_sell_order_and_wait(bithumb_api, ticker, price, volume):
                             loss_amount = (threading.current_thread().last_buy_price - executed_price) * executed_volume
                             log_with_timestamp(f"Loss Amount: {loss_amount:,.2f} KRW")
 
+                        # 매도 성공 시에만 포지션 초기화
                         position = None
+                        threading.current_thread().last_buy_price = None
+                        threading.current_thread().last_buy_volume = None
                         return market_order, position
+                    else:
+                        log_with_timestamp(f"[{thread_name}] Market sell order placement failed. Maintaining buy position for retry.")
+                        return None, "buy"  # 매도 실패 시 buy 포지션 유지
                 except Exception as e:
                     log_with_timestamp(f"[{thread_name}] Error during emergency market sell: {e}")
-                    # 에러 발생 시 기존 주문 계속 진행
+                    # 에러 발생 시에도 buy 포지션 유지
+                    return None, "buy"
 
             time.sleep(1)
             order = bithumb_api.get_order(order_uuid)
@@ -73,7 +80,7 @@ def place_sell_order_and_wait(bithumb_api, ticker, price, volume):
         return order, position
     else:
         log_with_timestamp(f"[{thread_name}] Sell order placement failed for {ticker}. Response: {response}")
-        return None, position
+        return None, "buy"  # 매도 실패 시 buy 포지션 유지
 
 def place_buy_order_and_wait(bithumb_api, ticker, price, volume):
     thread_name = threading.current_thread().name
@@ -312,12 +319,16 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
                             log_with_timestamp(f"Volume: {executed_volume:,.8f}")
                             log_with_timestamp(f"Loss Amount: {loss_amount:,.2f} KRW")
 
+                            # 매도 성공 시에만 포지션 초기화
                             current_position = None
                             last_buy_price = None
                             last_buy_volume = None
+                            threading.current_thread().last_buy_price = None
+                            threading.current_thread().last_buy_volume = None
                             continue
                     except Exception as e:
                         log_with_timestamp(f"[{thread_name}] Error during emergency sell for {ticker}: {e}")
+                        # 에러 발생 시에도 buy 포지션 유지
                         time.sleep(action_delay_seconds)
                         continue
 
@@ -391,6 +402,7 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
                         executed_volume = float(final_order.get('executed_volume', 0))
                         if executed_volume > 0:
                             last_buy_volume = executed_volume
+                            threading.current_thread().last_buy_volume = executed_volume
                             log_with_timestamp(f"[{thread_name}] Stored last buy volume for {ticker}: {last_buy_volume}")
                     except (ValueError, TypeError, KeyError) as e:
                         log_with_timestamp(f"[{thread_name}] Error parsing price from buy order for {ticker}: {e}")
