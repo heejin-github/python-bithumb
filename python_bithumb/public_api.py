@@ -101,7 +101,8 @@ def get_ohlcv(ticker: str, interval: str = "day", count: int = 200, period: floa
         return pd.DataFrame()
 
     df = pd.DataFrame(all_data)
-    df['candle_date_time_kst'] = pd.to_datetime(df['candle_date_time_kst'])
+    # ISO 8601 형식의 날짜 문자열을 datetime으로 변환
+    df['candle_date_time_kst'] = pd.to_datetime(df['candle_date_time_kst'], format='%Y-%m-%dT%H:%M:%S')
     df.set_index('candle_date_time_kst', inplace=True)
     df.sort_index(inplace=True)
     df.rename(columns={
