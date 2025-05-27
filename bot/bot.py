@@ -7,6 +7,8 @@ import time
 import threading
 from datetime import datetime
 import numpy as np
+import requests
+import json
 
 def log_with_timestamp(message):
     print(f"{datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')} {message}")
@@ -60,6 +62,22 @@ def place_sell_order_and_wait(bithumb_api, ticker, price, volume):
                         if hasattr(threading.current_thread(), 'last_buy_price') and threading.current_thread().last_buy_price:
                             loss_amount = (threading.current_thread().last_buy_price - executed_price) * executed_volume
                             log_with_timestamp(f"Loss Amount: {loss_amount:,.2f} KRW")
+
+                            # 디스코드 알림 전송 (로그는 그대로 유지)
+                            notification_title = f"⚠️ Emergency Market Sell Executed: {ticker}"
+                            notification_message = (
+                                f"**Emergency Market Sell Details**\n\n"
+                                f"Original Limit Order Price: {price:,.2f}\n"
+                                f"Market Sell Price: {executed_price:,.2f}\n"
+                                f"Volume: {executed_volume:,.8f}\n"
+                                f"Loss Amount: {loss_amount:,.2f} KRW"
+                            )
+
+                            # 큰 손실 발생 시 추가 알림
+                            if loss_amount > 0:  # 손실 발생
+                                notification_title = f"💔 Loss Alert: {ticker}"
+
+                            send_discord_notification(notification_message, notification_title)
 
                         # 매도 성공 시에만 포지션 초기화
                         position = None
@@ -316,11 +334,16 @@ def check_emergency_sell_conditions(ticker: str) -> bool:
                 log_with_timestamp("Last 5 1-minute candles are all down. Detailed candle information:")
 
                 # 각 캔들의 정보를 시간순으로 출력
+                candle_info = []
                 for idx, row in one_min_df.iterrows():
-                    log_with_timestamp(f"Time: {idx}")
-                    log_with_timestamp(f"  Open: {row['open']:,.2f}")
-                    log_with_timestamp(f"  Close: {row['close']:,.2f}")
-                    log_with_timestamp(f"  Change: {row['close'] - row['open']:,.2f} ({((row['close'] - row['open']) / row['open'] * 100):,.2f}%)")
+                    candle_msg = f"Time: {idx}\n  Open: {row['open']:,.2f}\n  Close: {row['close']:,.2f}\n  Change: {row['close'] - row['open']:,.2f} ({((row['close'] - row['open']) / row['open'] * 100):,.2f}%)"
+                    log_with_timestamp(candle_msg)
+                    candle_info.append(candle_msg)
+
+                # 디스코드 알림 전송 (로그는 그대로 유지)
+                notification_title = f"🚨 Emergency Sell Alert: {ticker}"
+                notification_message = f"**Emergency Sell Condition Detected!**\n\nLast 5 1-minute candles are all down:\n\n" + "\n\n".join(candle_info)
+                send_discord_notification(notification_message, notification_title)
 
                 return True
         return False
@@ -548,6 +571,45 @@ def calculate_percentile(df, percentile: float):
     except Exception as e:
         log_with_timestamp(f"Error calculating {percentile}th percentile: {e}")
         return None
+
+def send_discord_notification(message: str, title: str = None):
+    """
+    디스코드 웹훅을 통해 알림을 전송하는 함수
+
+    Parameters
+    ----------
+    message : str
+        전송할 메시지 내용
+    title : str, optional
+        메시지 제목 (기본값: None)
+    """
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        log_with_timestamp("Warning: DISCORD_WEBHOOK_URL not set in environment variables")
+        return
+
+    try:
+        # 임베드 형식으로 메시지 구성
+        embed = {
+            "title": title if title else "Trading Bot Notification",
+            "description": message,
+            "color": 3447003,  # 파란색
+            "timestamp": datetime.now().isoformat()
+        }
+
+        payload = {
+            "embeds": [embed]
+        }
+
+        headers = {
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(webhook_url, json=payload, headers=headers)
+        if response.status_code != 204:  # Discord webhook returns 204 on success
+            log_with_timestamp(f"Failed to send Discord notification. Status code: {response.status_code}")
+    except Exception as e:
+        log_with_timestamp(f"Error sending Discord notification: {e}")
 
 def main():
     bithumb_api_client = Bithumb(os.getenv("BITHUMB_ACCESS_KEY"), os.getenv("BITHUMB_SECRET_KEY"))
