@@ -420,8 +420,8 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
 
                 proceed_with_sell = False
                 if last_buy_price is not None:
-                    if float(price_for_sell) >= last_buy_price:
-                        log_with_timestamp(f"[{thread_name}] Sell condition met for {ticker}: Sell price {price_for_sell} >= Last buy price {last_buy_price}")
+                    if float(price_for_sell) > last_buy_price:
+                        log_with_timestamp(f"[{thread_name}] Sell condition met for {ticker}: Sell price {price_for_sell} > Last buy price {last_buy_price}")
                         proceed_with_sell = True
                     else:
                         log_with_timestamp(f"[{thread_name}] Sell condition NOT met for {ticker}: Sell price {price_for_sell} < Last buy price {last_buy_price}. Holding 'buy' position.")
@@ -620,6 +620,9 @@ def main():
     btc_trade_amount = float(os.getenv("BTC_TRADE_AMOUNT", "0.001")) # 기본값 0.001 BTC
     moodeng_trade_amount = float(os.getenv("MOODENG_TRADE_AMOUNT", "100")) # 기본값 100 MOODENG
     eth_trade_amount = float(os.getenv("ETH_TRADE_AMOUNT", "0.1")) # 기본값 0.1 ETH
+    wct_trade_amount = float(os.getenv("WCT_TRADE_AMOUNT", "100")) # 기본값 0.1 ETH
+    ondo_trade_amount = float(os.getenv("ONDO_TRADE_AMOUNT", "100")) # 기본값 0.1 ETH
+    ada_trade_amount = float(os.getenv("ADA_TRADE_AMOUNT", "100")) # 기본값 0.1 ETH
     # 각 스레드 내의 개별 매수/매도 액션 후 대기 시간
     # API 호출 빈도 및 시장 상황에 맞춰 조절 필요
     action_delay_seconds = int(os.getenv("ACTION_DELAY_SECONDS", "1")) # 기본값 1초
@@ -638,6 +641,12 @@ def main():
         trading_assets.append(("MOODENG-Trader", "KRW-MOODENG", moodeng_trade_amount))
     if eth_trade_amount > 0:
         trading_assets.append(("ETH-Trader", "KRW-ETH", eth_trade_amount))
+    if wct_trade_amount > 0:
+        trading_assets.append(("WCT-Trader", "KRW-WCT", wct_trade_amount))
+    if ondo_trade_amount > 0:
+        trading_assets.append(("ONDO-Trader", "KRW-ONDO", ondo_trade_amount))
+    if ada_trade_amount > 0:
+        trading_assets.append(("ADA-Trader", "KRW-ADA", ada_trade_amount))
 
     # 거래할 자산이 없는 경우
     if not trading_assets:
