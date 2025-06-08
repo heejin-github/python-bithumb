@@ -396,6 +396,22 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
                                 loss_amount = (last_buy_price - executed_price) * executed_volume
                                 log_with_timestamp(f"Loss Amount: {loss_amount:,.2f} KRW")
 
+                                # 디스코드 알림 전송 (로그는 그대로 유지)
+                                notification_title = f"⚠️ Emergency Market Sell Executed: {ticker}"
+                                notification_message = (
+                                    f"**Emergency Market Sell Details**\n\n"
+                                    f"Buy Price: {last_buy_price:,.2f}\n"
+                                    f"Sell Price: {executed_price:,.2f}\n"
+                                    f"Volume: {executed_volume:,.8f}\n"
+                                    f"Loss Amount: {loss_amount:,.2f} KRW"
+                                )
+
+                                # 큰 손실 발생 시 추가 알림
+                                if loss_amount > 0:  # 손실 발생
+                                    notification_title = f"💔 Loss Alert: {ticker}"
+
+                                send_discord_notification(notification_message, notification_title)
+
                             # 매도 성공 시에만 포지션 초기화
                             current_position = None
                             last_buy_price = None
