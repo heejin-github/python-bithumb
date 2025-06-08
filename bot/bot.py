@@ -431,8 +431,13 @@ def trade_continuously(bithumb_api_client, ticker, trade_amount, action_delay_se
                     time.sleep(action_delay_seconds)
                     continue
                 
-                price_for_sell = orderbook['orderbook_units'][0]['ask_price']
-                log_with_timestamp(f"[{thread_name}] Current ask price for {ticker}: {price_for_sell}")
+                # 두 번째 매도호가(ask_price)로 매도 시도, 없으면 첫 번째 호가 사용
+                if len(orderbook['orderbook_units']) > 1:
+                    price_for_sell = orderbook['orderbook_units'][1]['ask_price']
+                    log_with_timestamp(f"[{thread_name}] Using 2nd ask price for {ticker}: {price_for_sell}")
+                else:
+                    price_for_sell = orderbook['orderbook_units'][0]['ask_price']
+                    log_with_timestamp(f"[{thread_name}] Only 1 ask price available for {ticker}, using: {price_for_sell}")
 
                 proceed_with_sell = False
                 if last_buy_price is not None:
